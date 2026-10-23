@@ -1,5 +1,7 @@
 # dsh-peak-reminder
 
+[![npm](https://img.shields.io/npm/v/dsh-peak-reminder)](https://www.npmjs.com/package/dsh-peak-reminder) [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
 A [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) plugin that tells you when DeepSeek is charging **peak rates** — a reminder every few minutes while peak hours are on, silence during the cheap hours.
 
 DSH 峰谷提醒插件：峰时段每隔几分钟在界面顶部提醒一次「现在是峰时」，谷时完全不打扰；侧边栏底部常驻一行显示当前峰/谷状态和下一次切换的倒计时。
@@ -12,10 +14,10 @@ DSH 峰谷提醒插件：峰时段每隔几分钟在界面顶部提醒一次「�
 ## Install
 
 ```sh
-dsh plugin --profile web add github:54nanmiao/dsh-peak-reminder
+dsh plugin --profile web add dsh-peak-reminder
 ```
 
-`github:` is a pnpm git spec — DSH's plugin manager hands git specs to pnpm and fetches them itself. If your build does not take git specs, clone the repo and point the profile at the checkout instead:
+Published on npm as [`dsh-peak-reminder`](https://www.npmjs.com/package/dsh-peak-reminder). Git and local installs work too — `github:` is a pnpm git spec, and DSH's plugin manager hands git specs to pnpm and fetches them itself. If your build does not take git specs, clone the repo and point the profile at the checkout instead:
 
 ```sh
 git clone https://github.com/54nanmiao/dsh-peak-reminder
