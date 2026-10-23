@@ -1,6 +1,6 @@
 {
   "name": "dsh-peak-reminder",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH plugin: reminds you when DeepSeek is on peak-hour pricing, every few minutes while peak hours are on and never during valley hours, with a sidebar status row.",
   "icon": "icon.svg",
   "license": "MIT",
