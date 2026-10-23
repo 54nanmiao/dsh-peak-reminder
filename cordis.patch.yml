@@ -1,0 +1,5 @@
+# dsh-peak-reminder bundle patch：宿主路由（/plugins/dsh-peak-reminder/*）+ 客户端侧边栏行与设置节。
+# name 必须是真实包名，cordis 按 name 做 import；写错会 Cannot find package。
+- insert:
+    - id: dsh-peak-reminder
+      name: dsh-peak-reminder

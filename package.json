@@ -1,0 +1,54 @@
+{
+  "name": "dsh-peak-reminder",
+  "version": "0.1.0",
+  "description": "DSH plugin: reminds you when DeepSeek is on peak-hour pricing, every few minutes while peak hours are on and never during valley hours, with a sidebar status row.",
+  "icon": "icon.svg",
+  "license": "MIT",
+  "author": "54nanmiao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/54nanmiao/dsh-peak-reminder.git"
+  },
+  "homepage": "https://github.com/54nanmiao/dsh-peak-reminder#readme",
+  "bugs": {
+    "url": "https://github.com/54nanmiao/dsh-peak-reminder/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "peak",
+    "peak-hours",
+    "reminder",
+    "billing"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
