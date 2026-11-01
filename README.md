@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/dsh-peak-reminder)](https://www.npmjs.com/package/dsh-peak-reminder) [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-A [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) plugin that tells you when DeepSeek is charging **peak rates** — a reminder every few minutes while peak hours are on, silence during the cheap hours.
+A [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) plugin that tells you when DeepSeek is charging **peak rates** — a reminder every few minutes while peak hours are on, silence during the cheap hours. Peak costs **twice** what off-peak costs; this plugin says which side you are on and how long until it flips.
 
 DSH 峰谷提醒插件：峰时段每隔几分钟在界面顶部提醒一次「现在是峰时」，谷时完全不打扰；侧边栏底部常驻一行显示当前峰/谷状态和下一次切换的倒计时。
 
@@ -33,6 +33,20 @@ dsh plugin --profile web add /absolute/path/to/dsh-peak-reminder
 The plugin declares a `dsh.bundle` manifest (`cordis.patch.yml`) and ships no build step and no dependencies, so a source install needs no build approval.
 
 Reload the Web UI after installing. The sidebar row appears at the bottom; the settings section is under Settings → the plugins area.
+
+## How much it saves
+
+Off-peak rates are **exactly half** of peak rates (DeepSeek's own wording: *"Off-peak rates are half of the peak rates."*).
+Per 1M tokens, USD:
+
+| | Off-peak | Peak |
+|---|---|---|
+| Input, cache hit | $0.003 | $0.006 |
+| Input, cache miss | $0.15 | $0.30 |
+| Output | $0.60 | $1.20 |
+
+So 1M output tokens costs $1.20 during peak and $0.60 off-peak — a $0.60 difference for the same work.
+The sidebar shows which side you are on (`峰时 2×` / `谷时 5 折`) and how long until it flips.
 
 ## Peak rules
 
