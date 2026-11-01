@@ -14,8 +14,14 @@ DSH 峰谷提醒插件：峰时段每隔几分钟在界面顶部提醒一次「�
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-peak-reminder
+# with a global dsh CLI
+dsh plugin --profile <profile> add dsh-peak-reminder
+
+# or without installing dsh globally
+npx -y @deepseek-ai/dsh plugin --profile <profile> add dsh-peak-reminder
 ```
+
+`--profile` is **required** and must be the profile you actually run. The desktop app's profile is usually `desktop`; the CLI/web profile is usually `web`. Installing into a profile you do not launch looks like a successful install and then nothing appears — check the directory name under `~/.dsh/profiles/` (or `%USERPROFILE%\.dsh\profiles\` on Windows) when unsure.
 
 Published on npm as [`dsh-peak-reminder`](https://www.npmjs.com/package/dsh-peak-reminder). Git and local installs work too — `github:` is a pnpm git spec, and DSH's plugin manager hands git specs to pnpm and fetches them itself. If your build does not take git specs, clone the repo and point the profile at the checkout instead:
 
