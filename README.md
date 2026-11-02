@@ -34,6 +34,24 @@ The plugin declares a `dsh.bundle` manifest (`cordis.patch.yml`) and ships no bu
 
 Reload the Web UI after installing. The sidebar row appears at the bottom; the settings section is under Settings → the plugins area.
 
+## Troubleshooting
+
+**`'pnpm' is not recognized as an internal or external command`** — `dsh plugin` does not ship its own pnpm: it hands `add …` to whatever `pnpm` is on `PATH`, so the install fails at the first step on machines that only have npm (the desktop app bundles pnpm under `~/.dsh/dsh-runtimes/*/dependencies/pnpm` but does not put it on `PATH`). Fix by installing pnpm, or by prepending the bundled one for the command:
+
+```sh
+# Windows: point a shim at the pnpm the desktop app already bundles
+set PATH=%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin;%PATH%
+npm i -g pnpm        # or just install pnpm once, anywhere on PATH
+```
+
+**It installs an older version than `npm view dsh-peak-reminder version` reports** — recent pnpm versions gate packages by release age (`minimumReleaseAge`). A version published minutes ago is skipped silently and the previous one is installed instead, so `^0.x` in your `package.json` points at the older release. Ask for the version you want explicitly:
+
+```sh
+dsh plugin --profile <profile> add dsh-peak-reminder@0.1.3
+```
+
+pnpm then prints `Added 1 entry to minimumReleaseAgeExclude …` and installs it. (Observed with pnpm 11.28.5: `add dsh-peak-reminder` picked the ~29 h-old release while `add dsh-peak-reminder@0.1.3` — published ~45 min earlier — succeeded.)
+
 ## How much it saves
 
 Off-peak rates are **exactly half** of peak rates (DeepSeek's own wording: *"Off-peak rates are half of the peak rates."*).
@@ -116,6 +134,8 @@ Checks the 09:00/12:00/14:00/18:00 boundaries, weekends, a 调休 Sunday, Nation
 **规则只写在 `lib/peak.js` 一处**，宿主判定、浏览器只负责显示，所以补节假日年份只需要改那一个数组。
 
 **已知边界：** 节假日表目前只到 2026 年 12 月 31 日；次年放假安排公布后要手工补，补之前会把未来节假日当普通工作日（多提醒，不会漏提醒）。
+
+**两条实测踩过的安装坑**（详见上面 Troubleshooting）：① `dsh plugin` 不会自己带 pnpm，它把 `add` 交给 PATH 上的 pnpm —— 只装了桌面版、没装 pnpm 的机器会报 `'pnpm' is not recognized`，把 `~\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin` 加进 PATH 即可；② pnpm 的 `minimumReleaseAge` 供应链闸门会跳过「刚发布不到一天」的版本，于是悄悄装成上一版 —— 想要最新版就显式写版本号 `add dsh-peak-reminder@0.1.3`。
 
 **安装、配置、接口字段**见上面的英文部分，两者是同一份内容的两种语言。
 
