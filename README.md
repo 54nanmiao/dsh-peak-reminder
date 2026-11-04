@@ -65,6 +65,7 @@ Per 1M tokens, USD:
 
 So 1M output tokens costs $1.20 during peak and $0.60 off-peak — a $0.60 difference for the same work.
 The sidebar shows which side you are on (`峰时 2×` / `谷时 5 折`) and how long until it flips.
+Since 0.2.0 it also shows a second line — **this week's spend during peak, and what it would have been off-peak** — computed from DSH's own `~/.dsh/.dshw-usage.json` (`本周峰时 ¥0.06 · 可省 ¥0.03`). That number is an estimate from per-request costs, not your bill.
 
 ## Peak rules
 
@@ -75,9 +76,16 @@ Judged **only** from the host clock in Beijing time, in `lib/peak.js`:
 | Peak (高峰计价) | Monday–Friday, `09:00–12:00` and `14:00–18:00` Beijing time |
 | Valley (空闲计价) | everything else: `00:00–09:00`, `12:00–14:00`, `18:00–24:00`, all weekends, all Chinese public holidays, and weekends that are 调休 workdays |
 
-The holiday table (`HOLIDAY_VALLEY` in `lib/peak.js`) currently lists **2026 only**, matching the pricing rules as published for 2026 (peak/valley pricing started 2026-08-17, weekend-wide valley from 2026-08-23, holiday-wide valley from 2026-09-19).
+The built-in holiday table (`BUILTIN_HOLIDAYS` in `lib/peak.js`) lists all of **2026** plus the already-published **2027** dates: New Year 1/1–1/3, Spring Festival 2/5–2/13, Qingming 4/3–4/5, Dragon Boat 6/9, Mid-Autumn 9/15, National Day 10/1–10/7.
 
-> When the State Council publishes the next year's holiday schedule (usually November), add those dates to `HOLIDAY_VALLEY`. Until then a future holiday is treated as an ordinary weekday, which **over-reminds but never misses** a reminder.
+**Labor Day 2027 (4/30–5/4) is deliberately absent.** The 2027 schedule was only available through media repeats, where that block is marked 「预计」 with a single make-up workday — and guessing a holiday date wrong can *miss* a reminder, which is worse than an extra one. Add it yourself once the State Council notice is out:
+
+```json
+// ~/.dsh/peak-reminder-holidays.json — merged on top of the built-in table
+["2027-04-30", "2027-05-01", "2027-05-02", "2027-05-03", "2027-05-04"]
+```
+
+Until a future holiday is added, it is treated as an ordinary weekday: **over-reminds but never misses**.
 
 ## Configuration
 
@@ -88,7 +96,10 @@ Settings page writes `~/.dsh/peak-reminder.json`; you can also edit the file by 
   "enabled": true,
   "intervalMinutes": 5,
   "notifyOnSwitch": true,
-  "showSidebar": true
+  "showSidebar": true,
+  "showLedger": true,
+  "peakHours": [[9, 12], [14, 18]],
+  "holidays": ["2027-04-30"]
 }
 ```
 
@@ -98,6 +109,9 @@ Settings page writes `~/.dsh/peak-reminder.json`; you can also edit the file by 
 | `intervalMinutes` | `5` | minutes between reminders while peak (clamped to 1–120) |
 | `notifyOnSwitch` | `true` | also remind once at each peak↔valley boundary |
 | `showSidebar` | `true` | show the sidebar status row at all |
+| `showLedger` | `true` | show the second line「本周峰时 ¥x · 可省 ¥y」 (0.2.0) |
+| `peakHours` | `[[9,12],[14,18]]` | peak windows in Beijing time, `[startHour, endHour)`; invalid or overlapping input falls back to the default instead of throwing (0.2.0) |
+| `holidays` | `null` | extra valley dates, `["YYYY-MM-DD", …]` or `{"YYYY-MM-DD": 1}`; merged with `~/.dsh/peak-reminder-holidays.json` and the built-in table (0.2.0) |
 
 ## HTTP surface
 
@@ -131,9 +145,12 @@ Checks the 09:00/12:00/14:00/18:00 boundaries, weekends, a 调休 Sunday, Nation
 
 **为什么要有这个插件。** deepseek 的峰谷定价按北京时间切换：工作日 09:00–12:00、14:00–18:00 是高峰计价，其余时间（含周末、法定节假日、调休）是空闲计价。想知道「现在贵不贵」，通常得自己去查规则或者看余额面板；这个插件把状态放在侧边栏常驻一行，并在峰时按你设的间隔提醒。
 
-**规则只写在 `lib/peak.js` 一处**，宿主判定、浏览器只负责显示，所以补节假日年份只需要改那一个数组。
+**规则只写在 `lib/peak.js` 一处**，宿主判定、浏览器只负责显示。0.2.0 起不必改代码：峰段写在配置的 `peakHours`，节假日写 `~/.dsh/peak-reminder-holidays.json`，两者都与内置表合并。
 
-**已知边界：** 节假日表目前只到 2026 年 12 月 31 日；次年放假安排公布后要手工补，补之前会把未来节假日当普通工作日（多提醒，不会漏提醒）。
+**0.2.0 新增：** 侧边栏第二行显示「本周峰时 ¥x · 可省 ¥y」。数字来自 DSH 自己的 `~/.dsh/.dshw-usage.json` 逐请求成本，是估算不是账单；它对自己也诚实——作者整周只有 1 次请求落在峰时（¥0.06），所以这行更多是给白天上班的人看的。
+
+**已知边界：** 内置节假日表有 2026 全年 + 2027 已公布的 6 个假期；**2027 劳动节（4/30–5/4）故意没写**，因为当时只有媒体转载、原文标着「预计」，而加错日期会漏提醒。等国务院通知出来后，把它补进 `~/.dsh/peak-reminder-holidays.json` 即可。补之前，未来节假日按普通工作日处理（多提醒，不会漏提醒）。
+**装了什么、有没有装错**：可以顺手跑 [`dsh-doctor`](https://github.com/54nanmiao/dsh-doctor)，它会查 pnpm 是否在 PATH、插件是否装了却没启用、registry 上有没有新版本。
 
 **两条实测踩过的安装坑**（详见上面 Troubleshooting）：① `dsh plugin` 不会自己带 pnpm，它把 `add` 交给 PATH 上的 pnpm —— 只装了桌面版、没装 pnpm 的机器会报 `'pnpm' is not recognized`，把 `~\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\pnpm\bin` 加进 PATH 即可；② pnpm 的 `minimumReleaseAge` 供应链闸门会跳过「刚发布不到一天」的版本，于是悄悄装成上一版 —— 想要最新版就显式写版本号 `add dsh-peak-reminder@0.1.3`。
 
