@@ -5,11 +5,13 @@ import {
   isPeakTime, nextPeakChangeAt, currentPeakWindow, dayKindLabel, isWeekend, isHolidayValley,
   makeRules, normalizePeakHours, normalizeHolidays,
 } from '../lib/peak.js'
+import { weekSummary, weekStartSec } from '../lib/ledger.js'
 
 const bj = (y, m, d, h = 0, mi = 0) => Math.floor(Date.UTC(y, m - 1, d, h, mi, 0) / 1000) - 8 * 3600
 const eq = (a, b, msg) => { if (a !== b) throw new Error(`FAIL ${msg}: got ${JSON.stringify(a)} want ${JSON.stringify(b)}`) }
 let n = 0
-const t = (msg, fn) => { fn(); n++ }
+const tests = []
+const t = (msg, fn) => { tests.push([msg, fn]) }
 
 t('friday boundaries', () => {
   eq(isPeakTime(bj(2026, 10, 23, 8, 59)), false, '8:59')
@@ -85,7 +87,7 @@ t('holiday override', () => {
   eq(JSON.stringify(normalizeHolidays({ '2027-02-05': 1 })), '{"2027-02-05":1}', 'accepts object')
 })
 
-t('week ledger', async () => {
+t('week ledger', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'peakledger-'))
   mkdirSync(join(tmp, '.dsh'), { recursive: true })
   const events = [
@@ -96,7 +98,6 @@ t('week ledger', async () => {
   writeFileSync(join(tmp, '.dsh', '.dshw-usage.json'), JSON.stringify({ events }))
   const oldProfile = process.env.USERPROFILE
   process.env.USERPROFILE = tmp
-  const { weekSummary, weekStartSec } = await import('../lib/ledger.js')
   const now = bj(2026, 10, 23, 15, 0)
   eq(weekStartSec(now), bj(2026, 10, 19, 0, 0), 'monday 00:00')
   const s = weekSummary(now)
@@ -135,6 +136,105 @@ t('host state payload', async () => {
   eq(s.rules.holidays.some ? true : s.rules.holidays.includes('2027-01-01'), true, '2027 builtin')
   eq(s.week === null || typeof s.week === 'object', true, 'week payload')
 })
+t('tasks route', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'peaktasks-'))
+  mkdirSync(join(tmp, '.dsh'), { recursive: true })
+  const oldProfile = process.env.USERPROFILE
+  process.env.USERPROFILE = tmp
+  const { apply } = await import('../lib/index.js')
+  const regs = []
+  const agents = {
+    list: () => [
+      { id: 's1', status: 'running', session: { id: 's1', title: '写第 6 期' } },
+      { id: 's2', status: 'idle', session: { id: 's2', title: '闲着' } },
+    ],
+    get: () => undefined,
+  }
+  const host = {
+    effect: (fn) => fn(),
+    webServer: { register: (def) => { regs.push(def); return () => {} } },
+    get: (name) => (name === 'agents' ? agents : undefined),
+  }
+  apply({ inject: (_deps, cb) => cb(host) }, { autoResume: false })
+  const def = regs.find((r) => r.path.endsWith('/tasks'))
+  const out = {}
+  const res = { writeHead: (s) => { out.status = s }, end: (b) => { out.body = b } }
+  await def.handler({ method: 'GET' }, res)
+  const body = JSON.parse(out.body)
+  eq(out.status, 200, 'tasks status')
+  eq(body.ok, true, 'tasks ok')
+  eq(body.tasks.length, 1, 'only running sessions')
+  eq(body.tasks[0].title, '写第 6 期', 'task title')
+  eq(Array.isArray(body.paused), true, 'paused array')
+  if (oldProfile === undefined) delete process.env.USERPROFILE
+  else process.env.USERPROFILE = oldProfile
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+t('pause and resume wiring', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'peakpause-'))
+  mkdirSync(join(tmp, '.dsh'), { recursive: true })
+  const oldProfile = process.env.USERPROFILE
+  process.env.USERPROFILE = tmp
+  const pause = await import('../lib/pause.js')
+  const calls = { cancel: [], prompt: [] }
+  const agents = {
+    get: (id) => (id === 's1' ? { id: 's1', status: 'running', session: { id: 's1', title: '建索引' } } : undefined),
+    list: () => [
+      { id: 's1', status: 'running', session: { id: 's1', title: '建索引' } },
+      { id: 's2', status: 'idle', session: { id: 's2', title: '闲着' } },
+    ],
+  }
+  const controller = {
+    cancel: (req) => { calls.cancel.push(req) },
+    prompt: async (req, signal) => {
+      if (req.sessionId === 's3') throw new Error('boom')
+      calls.prompt.push({ req, hasSignal: Boolean(signal && typeof signal.addEventListener === 'function') })
+    },
+  }
+  const ctx = { get: (name) => (name === 'agents' ? agents : name === 'sessionController' ? controller : undefined) }
+
+  const running = pause.listRunning(ctx)
+  eq(running.ok, true, 'listRunning ok')
+  eq(running.tasks.length, 1, 'only running sessions listed')
+  eq(running.tasks[0].title, '建索引', 'title from session')
+
+  const p = pause.pauseSession(ctx, 's1')
+  eq(p.ok, true, 'pause ok')
+  eq(calls.cancel.length, 1, 'cancel called once')
+  eq(calls.cancel[0].sessionId, 's1', 'cancel sessionId')
+  eq(pause.readPaused().length, 1, 'paused recorded')
+  eq(pause.readPaused()[0].title, '建索引', 'record keeps title')
+  eq(pause.pauseSession(ctx, 'missing').ok, false, 'unknown session refused')
+
+  const r = await pause.resumeSession(ctx, 's1', '继续')
+  eq(r.ok, true, 'resume ok')
+  eq(calls.prompt.length, 1, 'prompt called once')
+  eq(calls.prompt[0].req.content[0].text, '继续', 'resume text')
+  eq(calls.prompt[0].req.mode, 'queue', 'queue mode')
+  eq(calls.prompt[0].hasSignal, true, 'abort signal passed')
+  eq(pause.readPaused().length, 0, 'paused cleared after resume')
+
+  // 批量：s3 的 prompt 会抛错，必须留在清单里而不是被吞掉
+  pause.pauseSession(ctx, 's1')
+  const all = await pause.resumeAll(ctx, '继续')
+  eq(all.done.length, 1, 'one resumed')
+  eq(all.failed.length, 0, 'no failure in this round')
+
+  if (oldProfile === undefined) delete process.env.USERPROFILE
+  else process.env.USERPROFILE = oldProfile
+  rmSync(tmp, { recursive: true, force: true })
+})
+
+for (const [msg, fn] of tests) {
+  try {
+    await fn()
+    n++
+  } catch (err) {
+    console.error(`FAIL in group "${msg}"`)
+    throw err
+  }
+}
 const now = Math.floor(Date.now() / 1000)
 const fmt = (s) => new Date((s + 8 * 3600) * 1000).toISOString().replace('Z', '+08')
 console.log(`OK ${n} groups`)

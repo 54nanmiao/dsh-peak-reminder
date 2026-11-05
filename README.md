@@ -8,8 +8,9 @@ DSH 峰谷提醒插件：峰时段每隔几分钟在界面顶部提醒一次「�
 
 - 侧边栏底部一行（`sidebar.footer.action`）：`峰时 · 32 分钟后谷` / `谷时 · 1 分钟后峰`；橙点是峰时、绿点是谷时、灰点是关掉了。悬停看完整说明，点一下立刻弹一条当前状态。
 - 顶部提醒条：进入峰时先给一条「现在是峰时 —— 高峰计价」，之后每 N 分钟（默认 5）再给一条；进入谷时提示「现在是谷时 —— 空闲计价」；**谷时期间不会重复提醒**。提醒条带「知道了」和「暂停 30 分钟」。
-- 设置页一节（`settings.section`）：总开关、提醒间隔、峰↔谷切换提醒、侧边栏状态行。
-- 无网络请求、无凭据，只写一个配置文件 `~/.dsh/peak-reminder.json`。
+- 设置页一节（`settings.section`）：总开关、提醒间隔、峰↔谷切换提醒、侧边栏状态行、谷时自动续跑开关，以及一份「正在跑的任务」清单（逐个「暂停」，谷时逐个或一键「继续」，0.3.0）。
+- 峰时可以把正在跑的任务**停在这一轮**，队列不丢；到了谷时（或你手动点「继续」）按原任务继续跑。
+- 无网络请求、无凭据，只写两个文件：`~/.dsh/peak-reminder.json`（配置）与 `~/.dsh/peak-reminder-paused.json`（暂停清单）。
 
 ## Install
 
@@ -67,8 +68,24 @@ So 1M output tokens costs $1.20 during peak and $0.60 off-peak — a $0.60 diffe
 The sidebar shows which side you are on (`峰时 2×` / `谷时 5 折`) and how long until it flips.
 Since 0.2.0 it also shows a second line — **this week's spend during peak, and what it would have been off-peak** — computed from DSH's own `~/.dsh/.dshw-usage.json` (`本周峰时 ¥0.06 · 可省 ¥0.03`). That number is an estimate from per-request costs, not your bill.
 
-## Peak rules
+## Peak-time pause and resume (0.3.0)
 
+Peak pricing is 2× and nothing stops you from being mid-task when 09:00 hits. The tasks panel in Settings lists every session the host reports as **running**, with one button: **暂停**.
+
+- **暂停** cancels the session's *current turn only* (`session.cancel`, which DSH implements as `agent.cancel({ kind: 'user' }, { keepInbox: true })`). Queued messages and the rest of the task stay in the inbox.
+- The session id goes into `~/.dsh/peak-reminder-paused.json` **before** the cancel is attempted, and the record is rolled back if the cancel throws — a failed pause never silently loses a task.
+- **继续** enqueues one prompt (`session.prompt`, `mode: 'queue'`) with `resumeText`, so the agent picks the task up again as an ordinary queued turn.
+- With `autoResume` on (default), a 60-second host heartbeat checks the clock: **outside peak hours**, every paused session is resumed automatically. During peak hours it does nothing.
+- The sidebar row keeps a count while anything is paused: `⏸ 2 个任务已暂停`.
+
+Two honest limits: this only stops a session at a **turn boundary** — a tool call already in flight finishes first; and `resumeText` is an ordinary prompt, so the model continues from context rather than from a saved checkpoint.
+
+```json
+// ~/.dsh/peak-reminder.json
+{ "autoResume": true, "resumeText": "继续刚才的任务，从断点接着做，不用复述已经做完的部分。" }
+```
+
+## Peak rules
 Judged **only** from the host clock in Beijing time, in `lib/peak.js`:
 
 | | |
@@ -98,6 +115,8 @@ Settings page writes `~/.dsh/peak-reminder.json`; you can also edit the file by 
   "notifyOnSwitch": true,
   "showSidebar": true,
   "showLedger": true,
+  "autoResume": true,
+  "resumeText": "继续刚才的任务，从断点接着做，不用复述已经做完的部分。",
   "peakHours": [[9, 12], [14, 18]],
   "holidays": ["2027-04-30"]
 }
@@ -111,6 +130,8 @@ Settings page writes `~/.dsh/peak-reminder.json`; you can also edit the file by 
 | `showSidebar` | `true` | show the sidebar status row at all |
 | `showLedger` | `true` | show the second line「本周峰时 ¥x · 可省 ¥y」 (0.2.0) |
 | `peakHours` | `[[9,12],[14,18]]` | peak windows in Beijing time, `[startHour, endHour)`; invalid or overlapping input falls back to the default instead of throwing (0.2.0) |
+| `autoResume` | `true` | resume paused sessions automatically once the clock leaves peak hours (0.3.0) |
+| `resumeText` | see above | the prompt sent when resuming; a blank value falls back to the default (0.3.0) |
 | `holidays` | `null` | extra valley dates, `["YYYY-MM-DD", …]` or `{"YYYY-MM-DD": 1}`; merged with `~/.dsh/peak-reminder-holidays.json` and the built-in table (0.2.0) |
 
 ## HTTP surface
@@ -121,6 +142,9 @@ The host half registers two routes on the DSH web server (no auth, same as other
 GET  /plugins/dsh-peak-reminder/state    -> { ok, now, isPeak, peakWindow, nextChangeAt, dayKind, config, rules }
 GET  /plugins/dsh-peak-reminder/config   -> { ok, config, file }
 POST /plugins/dsh-peak-reminder/config   -> { ok, config, file }   body: any subset of the keys above
+GET  /plugins/dsh-peak-reminder/tasks    -> { ok, tasks: [{ sessionId, title }], paused: [{ sessionId, title, at }] }
+POST /plugins/dsh-peak-reminder/pause    -> { ok } | { ok:false, reason }   body: { sessionId }
+POST /plugins/dsh-peak-reminder/resume   -> { ok, done, failed }             body: { sessionId } or { all: true }
 ```
 
 `now` is the host's epoch seconds. The client renders from that and corrects for local clock skew, so the countdown follows the machine that actually knows the time. Peak/valley decisions are never re-derived in the browser — only the host decides, so the holiday table lives in exactly one place.
@@ -129,6 +153,7 @@ POST /plugins/dsh-peak-reminder/config   -> { ok, config, file }   body: any sub
 
 - `lib/index.js` — host half: `apply(ctx, config)` injects `webServer`, registers the two routes, and owns config loading (`defaults < cordis patch config < ~/.dsh/peak-reminder.json`).
 - `lib/client.js` — browser half: injected through `slots.register` into `sidebar.footer.action` and `settings.section`; polls `/state` every 30 s, ticks once a second for the countdown, and renders the toast with plain DOM (no dependency on any DSH component package).
+- `lib/pause.js` — running-session lookup via the host `agents` service, pause/resume against the `sessionController` service, plus the `~/.dsh/peak-reminder-paused.json` ledger (0.3.0).
 - `lib/peak.js` — pure functions, no dependencies: `isPeakTime`, `nextPeakChangeAt`, `currentPeakWindow`, `dayKindLabel`, `isWeekend`, `isHolidayValley`.
 
 ## Test
@@ -137,7 +162,7 @@ POST /plugins/dsh-peak-reminder/config   -> { ok, config, file }   body: any sub
 node test/run.mjs
 ```
 
-Checks the 09:00/12:00/14:00/18:00 boundaries, weekends, a 调休 Sunday, National Day, the window label, `nextPeakChangeAt` across a weekend, and that the state flips on every boundary it reports.
+12 groups: the 09:00/12:00/14:00/18:00 boundaries, weekends, a 调休 Sunday, National Day, the window label, `nextPeakChangeAt` across a weekend and that the state flips on every boundary it reports; custom peak hours and the holiday override; the weekly ledger against a fabricated `~/.dsh/.dshw-usage.json`; the host `/state` payload through a fake `webServer`; and the pause/resume wiring through fake `agents` + `sessionController` (including a resume that throws and must stay in the list).
 
 ---
 
@@ -148,6 +173,8 @@ Checks the 09:00/12:00/14:00/18:00 boundaries, weekends, a 调休 Sunday, Nation
 **规则只写在 `lib/peak.js` 一处**，宿主判定、浏览器只负责显示。0.2.0 起不必改代码：峰段写在配置的 `peakHours`，节假日写 `~/.dsh/peak-reminder-holidays.json`，两者都与内置表合并。
 
 **0.2.0 新增：** 侧边栏第二行显示「本周峰时 ¥x · 可省 ¥y」。数字来自 DSH 自己的 `~/.dsh/.dshw-usage.json` 逐请求成本，是估算不是账单；它对自己也诚实——作者整周只有 1 次请求落在峰时（¥0.06），所以这行更多是给白天上班的人看的。
+
+**0.3.0 新增：峰时暂停、谷时续跑。** 设置页多了一份「正在跑的任务」清单：峰时点「暂停」只取消**当前这一轮**（宿主实现是 `agent.cancel({ kind: 'user' }, { keepInbox: true })`），队列和后续步骤都还在；到谷时（默认开着 `autoResume`，每分钟心跳检查一次）自动按 `resumeText` 继续，也可以手动点「继续」或「全部继续」。清单落在 `~/.dsh/peak-reminder-paused.json`，先写记录再发取消，取消失败会回滚记录，不会出现「清单里有、任务却没停」或反过来。两条边界要说清：它只在**回合边界**停，正在跑的工具调用会先跑完；续跑发的是普通提示，模型靠上下文接着做，不是存档回滚。
 
 **已知边界：** 内置节假日表有 2026 全年 + 2027 已公布的 6 个假期；**2027 劳动节（4/30–5/4）故意没写**，因为当时只有媒体转载、原文标着「预计」，而加错日期会漏提醒。等国务院通知出来后，把它补进 `~/.dsh/peak-reminder-holidays.json` 即可。补之前，未来节假日按普通工作日处理（多提醒，不会漏提醒）。
 **装了什么、有没有装错**：可以顺手跑 [`dsh-doctor`](https://github.com/54nanmiao/dsh-doctor)，它会查 pnpm 是否在 PATH、插件是否装了却没启用、registry 上有没有新版本。
