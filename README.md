@@ -75,7 +75,10 @@ Peak pricing is 2× and nothing stops you from being mid-task when 09:00 hits. T
 - **暂停** cancels the session's *current turn only* (`session.cancel`, which DSH implements as `agent.cancel({ kind: 'user' }, { keepInbox: true })`). Queued messages and the rest of the task stay in the inbox.
 - The session id goes into `~/.dsh/peak-reminder-paused.json` **before** the cancel is attempted, and the record is rolled back if the cancel throws — a failed pause never silently loses a task.
 - **继续** enqueues one prompt (`session.prompt`, `mode: 'queue'`) with `resumeText`, so the agent picks the task up again as an ordinary queued turn.
-- With `autoResume` on (default), a 60-second host heartbeat checks the clock: **outside peak hours**, every paused session is resumed automatically. During peak hours it does nothing.
+- **Pausing is opt-in and per task** — nothing is ever paused automatically. You pick the rows.
+- With `autoResume` on (default), a 60-second host heartbeat checks the clock: **outside peak hours**, every paused session *that still has the per-task toggle on* is resumed automatically. During peak hours it does nothing.
+- **Per-task opt-out (0.3.1)**: each paused row carries a `谷时自动续` checkbox. Uncheck it and that task stays paused indefinitely — only your own **继续** starts it again. The heartbeat skips it and reports it under `skipped`.
+- **全部继续** is an explicit instruction, so it resumes everything regardless of those checkboxes.
 - The sidebar row keeps a count while anything is paused: `⏸ 2 个任务已暂停`.
 
 Two honest limits: this only stops a session at a **turn boundary** — a tool call already in flight finishes first; and `resumeText` is an ordinary prompt, so the model continues from context rather than from a saved checkpoint.
@@ -130,7 +133,7 @@ Settings page writes `~/.dsh/peak-reminder.json`; you can also edit the file by 
 | `showSidebar` | `true` | show the sidebar status row at all |
 | `showLedger` | `true` | show the second line「本周峰时 ¥x · 可省 ¥y」 (0.2.0) |
 | `peakHours` | `[[9,12],[14,18]]` | peak windows in Beijing time, `[startHour, endHour)`; invalid or overlapping input falls back to the default instead of throwing (0.2.0) |
-| `autoResume` | `true` | resume paused sessions automatically once the clock leaves peak hours (0.3.0) |
+| `autoResume` | `true` | master switch for the valley heartbeat (0.3.0); each paused task can opt out on its own row (0.3.1) |
 | `resumeText` | see above | the prompt sent when resuming; a blank value falls back to the default (0.3.0) |
 | `holidays` | `null` | extra valley dates, `["YYYY-MM-DD", …]` or `{"YYYY-MM-DD": 1}`; merged with `~/.dsh/peak-reminder-holidays.json` and the built-in table (0.2.0) |
 
@@ -175,6 +178,8 @@ node test/run.mjs
 **0.2.0 新增：** 侧边栏第二行显示「本周峰时 ¥x · 可省 ¥y」。数字来自 DSH 自己的 `~/.dsh/.dshw-usage.json` 逐请求成本，是估算不是账单；它对自己也诚实——作者整周只有 1 次请求落在峰时（¥0.06），所以这行更多是给白天上班的人看的。
 
 **0.3.0 新增：峰时暂停、谷时续跑。** 设置页多了一份「正在跑的任务」清单：峰时点「暂停」只取消**当前这一轮**（宿主实现是 `agent.cancel({ kind: 'user' }, { keepInbox: true })`），队列和后续步骤都还在；到谷时（默认开着 `autoResume`，每分钟心跳检查一次）自动按 `resumeText` 继续，也可以手动点「继续」或「全部继续」。清单落在 `~/.dsh/peak-reminder-paused.json`，先写记录再发取消，取消失败会回滚记录，不会出现「清单里有、任务却没停」或反过来。两条边界要说清：它只在**回合边界**停，正在跑的工具调用会先跑完；续跑发的是普通提示，模型靠上下文接着做，不是存档回滚。
+
+**0.3.1：停止是选择性的，续跑也是。** 暂停从来不会自动发生——清单里的「暂停」是你逐个点的。自动的只有谷时心跳，而每个已暂停的任务右边有一个「谷时自动续」勾：取消勾选，它就一停到底，只有你自己点「继续」才动（心跳会跳过它，并在返回里记进 `skipped`）。「全部继续」是你明确的指令，不看这些勾。
 
 **已知边界：** 内置节假日表有 2026 全年 + 2027 已公布的 6 个假期；**2027 劳动节（4/30–5/4）故意没写**，因为当时只有媒体转载、原文标着「预计」，而加错日期会漏提醒。等国务院通知出来后，把它补进 `~/.dsh/peak-reminder-holidays.json` 即可。补之前，未来节假日按普通工作日处理（多提醒，不会漏提醒）。
 **装了什么、有没有装错**：可以顺手跑 [`dsh-doctor`](https://github.com/54nanmiao/dsh-doctor)，它会查 pnpm 是否在 PATH、插件是否装了却没启用、registry 上有没有新版本。

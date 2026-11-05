@@ -1,4 +1,5 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -12,6 +13,13 @@ const eq = (a, b, msg) => { if (a !== b) throw new Error(`FAIL ${msg}: got ${JSO
 let n = 0
 const tests = []
 const t = (msg, fn) => { tests.push([msg, fn]) }
+// 假 req：readBody 只用到 on/data/end 三个事件
+function makeReq(body) {
+  const req = new EventEmitter()
+  req.method = 'POST'
+  process.nextTick(() => { req.emit('data', Buffer.from(body, 'utf8')); req.emit('end') })
+  return req
+}
 
 t('friday boundaries', () => {
   eq(isPeakTime(bj(2026, 10, 23, 8, 59)), false, '8:59')
@@ -166,6 +174,27 @@ t('tasks route', async () => {
   eq(body.tasks.length, 1, 'only running sessions')
   eq(body.tasks[0].title, '写第 6 期', 'task title')
   eq(Array.isArray(body.paused), true, 'paused array')
+
+  // /pause-auto：只改「谷时自动续」标记，既不 cancel 也不 prompt
+  writeFileSync(join(tmp, '.dsh', 'peak-reminder-paused.json'), JSON.stringify({
+    paused: [{ sessionId: 's1', title: '写第 6 期', pausedAt: 1, autoResume: true }],
+  }))
+  const autoDef = regs.find((r) => r.path.endsWith('/pause-auto'))
+  eq(Boolean(autoDef), true, 'pause-auto route registered')
+  const out2 = {}
+  const res2 = { writeHead: (s) => { out2.status = s }, end: (b) => { out2.body = b } }
+  await autoDef.handler(makeReq(JSON.stringify({ sessionId: 's1', autoResume: false })), res2)
+  const body2 = JSON.parse(out2.body)
+  eq(out2.status, 200, 'pause-auto status')
+  eq(body2.ok, true, 'pause-auto ok')
+  eq(body2.paused.autoResume, false, 'flag flipped off')
+  const after = JSON.parse(readFileSync(join(tmp, '.dsh', 'peak-reminder-paused.json'), 'utf8'))
+  eq(after.paused[0].autoResume, false, 'flag persisted')
+  const out3 = {}
+  const res3 = { writeHead: (s) => { out3.status = s }, end: (b) => { out3.body = b } }
+  await autoDef.handler(makeReq(JSON.stringify({ sessionId: 'nope', autoResume: false })), res3)
+  eq(out3.status, 409, 'pause-auto refuses unknown session')
+
   if (oldProfile === undefined) delete process.env.USERPROFILE
   else process.env.USERPROFILE = oldProfile
   rmSync(tmp, { recursive: true, force: true })
@@ -220,6 +249,19 @@ t('pause and resume wiring', async () => {
   const all = await pause.resumeAll(ctx, '继续')
   eq(all.done.length, 1, 'one resumed')
   eq(all.failed.length, 0, 'no failure in this round')
+
+  // 选择性：关掉「谷时自动续」的任务，心跳那侧必须跳过；只有用户点「全部继续」才动
+  pause.pauseSession(ctx, 's1', { autoResume: false })
+  eq(pause.readPaused()[0].autoResume, false, 'autoResume=false recorded')
+  const auto = await pause.resumeAll(ctx, '继续')
+  eq(auto.done.length, 0, 'auto-resume skips opt-out task')
+  eq(auto.skipped.length, 1, 'skipped reported')
+  eq(pause.readPaused().length, 1, 'opt-out task stays paused')
+  eq(pause.setAutoResume('s1', true).ok, true, 'can toggle back on')
+  eq(pause.setAutoResume('nope', true).ok, false, 'toggle refuses unknown session')
+  const forced = await pause.resumeAll(ctx, '继续', { onlyAuto: false })
+  eq(forced.done.length, 1, 'explicit all resumes opt-out task')
+  eq(pause.readPaused().length, 0, 'cleared after explicit resume')
 
   if (oldProfile === undefined) delete process.env.USERPROFILE
   else process.env.USERPROFILE = oldProfile
